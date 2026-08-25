@@ -7,6 +7,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.exceptions import TelegramBadRequest
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -34,8 +35,8 @@ async def command_help_handler(message: Message) -> None:
         f"📌 {html.bold('Справочное меню TeleAutoPost')}\n\n"
         f"Доступные команды на данный момент:\n"
         f"/start — Запустить бота и получить приветственное сообщение\n"
-        f"/help — Показать эту справку по командам\n\n"
-        f"Для отправки поста на канал проосто введите текст."
+        f"/help — показать эту справку по командам.\n\n"
+        f"Для отправки поста на канал просто введите текст.",
     )
 
 @dp.message(F.text)
@@ -45,13 +46,17 @@ async def command_send_post(message: Message) -> None:
         [InlineKeyboardButton(text="Отправить", callback_data="send_post")],
         [InlineKeyboardButton(text="Удалить", callback_data="delete_post")]
     ])
-    await message.answer(post + f"\n\n{'━'*15}\nДействия:", reply_markup=kb_markup)
+    try:
+        await message.answer(post + f"\n\n{'━'*15}\nДействия:", reply_markup=kb_markup)
+    except:
+        await message.answer("В HTML-разметке есть ошибки. Исправьте их и отправьте сообщение снова.")
 
 @dp.callback_query(F.data.endswith("post"))
 async def callback_answer_post(callback: CallbackQuery) -> None:
     command = callback.data
-    post_usr = callback.message.text.replace(f"\n\n{'━'*15}\nДействия:", "")
-    if callback.data == "send_post":
+    post_usr = callback.message.html_text.replace(f"\n\n{'━'*15}\nДействия:", "")
+
+    if command == "send_post":
         await bot.send_message(chat_id=CHANNEL_LINK, text=post_usr)
         await callback.message.edit_text("Пост успешно отправлен!", reply_markup=None)
     else:
