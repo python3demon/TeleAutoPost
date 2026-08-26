@@ -7,11 +7,16 @@ from aiogram import Bot, Dispatcher, html, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from dotenv import load_dotenv
+from aiogram.filters.callback_data import CallbackData
+from aiogram.types import (
+    Message,
+    InlineKeyboardMarkup, InlineKeyboardButton, 
+    CallbackQuery, LinkPreviewOptions
+)
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
@@ -23,7 +28,10 @@ if not TOKEN:
 
 config_user = {
     "id": -1,
-    "channel_link": ""
+    "channel_link": "",
+    "settings": {
+        "link_preview": True,
+    }
 }
 
 class Registration(StatesGroup):
@@ -92,10 +100,17 @@ async def command_send_post(message: Message) -> None:
         [InlineKeyboardButton(text="Удалить", callback_data="delete_post")]
     ])
     try:
-        await message.answer(post + f"\n\n{'━'*15}\nДействия:", reply_markup=kb_markup)
+        await message.answer(
+            post + f"\n\n{'━'*15}\nДействия:",
+            reply_markup=kb_markup,
+            link_preview_options=LinkPreviewOptions(
+                is_disabled=config_user["settings"]["link_preview"]
+            )
+        )
     except TelegramBadRequest:
         await message.answer("В HTML-разметке есть ошибки. Исправьте их и отправьте сообщение снова.")
-    except:
+    except Exception as e:
+        logging.error(f"Ошибка при создании превью: {e}")
         await message.answer("Произошла неизвестная ошибка, повторите.")
 
 @dp.callback_query(F.data.endswith("post"))
@@ -106,7 +121,13 @@ async def callback_answer_post(callback: CallbackQuery) -> None:
 
     if command == "send_post":
         try:
-            await bot.send_message(chat_id=config_user["channel_link"], text=post_usr)
+            await bot.send_message(
+                chat_id=config_user["channel_link"],
+                text=post_usr,
+                link_preview_options=LinkPreviewOptions(
+                    is_disabled=config_user["settings"]["link_preview"]
+                )
+            )
         except TelegramForbiddenError:
             await callback.message.answer(
                 "❌ Ошибка публикации!\n"
