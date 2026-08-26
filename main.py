@@ -34,6 +34,11 @@ config_user = {
     }
 }
 
+kb_markup_post = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="Отправить", callback_data="send_post")],
+    [InlineKeyboardButton(text="Удалить", callback_data="delete_post")]
+])
+
 class Registration(StatesGroup):
     waiting_for_channel = State()
 
@@ -95,14 +100,10 @@ async def command_help_handler(message: Message) -> None:
 @dp.message(F.text)
 async def command_send_post(message: Message) -> None:
     post = message.text
-    kb_markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Отправить", callback_data="send_post")],
-        [InlineKeyboardButton(text="Удалить", callback_data="delete_post")]
-    ])
     try:
         await message.answer(
             post + f"\n\n{'━'*15}\nДействия:",
-            reply_markup=kb_markup,
+            reply_markup=kb_markup_post,
             link_preview_options=LinkPreviewOptions(
                 is_disabled=config_user["settings"]["link_preview"]
             )
@@ -113,20 +114,44 @@ async def command_send_post(message: Message) -> None:
         logging.error(f"Ошибка при создании превью: {e}")
         await message.answer("Произошла неизвестная ошибка, повторите.")
 
+@dp.message(F.photo)
+async def command_send_post_with_photo(message: Message) -> None:
+    photo_id = message.photo[-2].file_id
+    post = message.caption
+    try:
+        await message.answer_photo(
+            photo=photo_id,
+            caption=post + f"\n\n{'━'*15}\nДействия:",
+            reply_markup=kb_markup_post,
+        )
+    except TelegramBadRequest:
+        await message.answer("В HTML-разметке есть ошибки. Исправьте их и отправьте сообщение снова.")
+    except Exception as e:
+        logging.error(f"Ошибка при создании превью: {e}")
+        await message.answer("Произошла неизвестная ошибка, повторите.")
+
 @dp.callback_query(F.data.endswith("post"))
 async def callback_answer_post(callback: CallbackQuery) -> None:
     command = callback.data
-    post_usr = callback.message.html_text.replace(f"\n\n{'━'*15}\nДействия:", "")
+    post = callback.message.html_text.replace(f"\n\n{'━'*15}\nДействия:", "")
     await callback.answer()
 
     if command == "send_post":
         try:
-            await bot.send_message(
-                chat_id=config_user["channel_link"],
-                text=post_usr,
-                link_preview_options=LinkPreviewOptions(
-                    is_disabled=config_user["settings"]["link_preview"]
+            if callback.message.photo:
+                photo_id = callback.message.photo[-2].file_id
+                await bot.send_photo(
+                    chat_id=config_user["channel_link"],
+                    photo=photo_id,
+                    caption=post
                 )
+            else:
+                await bot.send_message(
+                    chat_id=config_user["channel_link"],
+                    text=post,
+                    link_preview_options=LinkPreviewOptions(
+                        is_disabled=config_user["settings"]["link_preview"]
+                    )
             )
         except TelegramForbiddenError:
             await callback.message.answer(
@@ -141,7 +166,8 @@ async def callback_answer_post(callback: CallbackQuery) -> None:
                 f"❌ Ошибка запроса!\n"
                 f"Telegram не смог отправить сообщение. Возможно, указан неверный юзернейм канала."
             )
-        await callback.message.edit_text("Пост успешно отправлен!", reply_markup=None)
+        await callback.message.delete()
+        await callback.message.answer("Пост успешно отправлен!", reply_markup=None)
     else:
         await callback.message.delete()
 
