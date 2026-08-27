@@ -35,10 +35,6 @@ config_user = {
     }
 }
 
-cache_user = {
-    "post_text": ""
-}
-
 kb_markup_post = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="Отправить", callback_data="send_post")],
     [InlineKeyboardButton(text="Удалить", callback_data="delete_post")]
@@ -103,10 +99,11 @@ async def command_help_handler(message: Message) -> None:
         f"Для отправки поста на канал просто введите текст.",
     )
 
-@dp.message(F.text)
-async def command_send_post(message: Message) -> None:
+@router.message(F.text)
+async def command_send_post(message: Message, state: FSMContext) -> None:
     post = message.text
-    cache_user["post_text"] = post
+    await state.update_data(saved_post=post)
+    await state.set_state(PostCreation.holding_host)
     try:
         await message.answer(
             post + f"\n\n{'━'*15}\nДействия:",
@@ -121,6 +118,9 @@ async def command_send_post(message: Message) -> None:
         logging.error(f"Ошибка при создании превью: {e}")
         await message.answer("Произошла неизвестная ошибка, повторите.")
 
+class PostCreation(StatesGroup):
+    holding_host = State()
+
 class GroupPhotoMiddleware(BaseMiddleware):
     def __init__(self, latency: float = 0.5):
         # {media_group: [media], ...}
@@ -131,52 +131,73 @@ class GroupPhotoMiddleware(BaseMiddleware):
         if not event.photo:
             return await handler(event, data)
         if not event.media_group_id:
+            data["post"] = event.caption
             data["group_photo"] = [event.photo[-1].file_id]
             return await handler(event, data)
         
         try:
             self.cache[event.media_group_id].append(event)
+            return
 
         except KeyError:
             self.cache[event.media_group_id] = [event]
             await asyncio.sleep(self.latency)
             msgs = self.cache.pop(event.media_group_id)
-            data["group_photo"] = [msg.photo[-2].file_id for msg in msgs]
-            result = await handler(event, data)
+            data["group_photo"] = [msg.photo[-1].file_id for msg in msgs]
+            data["post"] = None
+            for msg in msgs:
+                if msg.caption:
+                    data["post"] = msg.caption
+                    break
+
+            return await handler(event, data)
 
 @router.message(F.photo)
-async def command_send_post_with_photo(message: Message, group_photo) -> None:
-    post = message.caption
-    if post is None:
+async def command_send_post_with_photo(message: Message, group_photo: list, post: str, state: FSMContext) -> None:
+    if not post:
         await message.answer("Добавьте подпись к фото!")
         return
-    
+
+    group = MediaGroupBuilder(caption=post)
+    for photo_id in group_photo:
+        group.add_photo(media=photo_id)
+
+    await state.update_data(saved_post=post, saved_group=group_photo)
+    await state.set_state(PostCreation.holding_host)
+
     try:
-        group = MediaGroupBuilder(caption=post)
-        for photo_id in group_photo:
-            group.add_photo(media=photo_id)
-        await bot.send_media_group(
+        group_msg = await bot.send_media_group(
             message.from_user.id,
-            group.build(),
+            group.build()
         )
-    except TelegramBadRequest:
+        await message.answer(
+            "Выберите действие:",
+            reply_markup=kb_markup_post
+        )
+        await state.update_data(group_msg_id=group_msg[0].message_id) # first msg, for delete
+
+    except TelegramBadRequest as e:
+        logging.error(e)
         await message.answer("В HTML-разметке есть ошибки. Исправьте их и отправьте сообщение снова.")
 
-@dp.callback_query(F.data.endswith("post"))
-async def callback_answer_post(callback: CallbackQuery) -> None:
+@router.callback_query(F.data.endswith("post"), PostCreation.holding_host)
+async def callback_answer_post(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
     command = callback.data
-    post = cache_user["post_text"]
+    data = await state.get_data()
+    post = data.get("saved_post")
+    group_photo = data.get("saved_group", [])
+    group_msg_id = data.get("group_msg_id")
+    last_msg_id = callback.message.message_id
     await callback.answer()
 
     if command == "send_post":
         try:
-            if callback.message.photo:
-                photo_id = callback.message.photo[-2].file_id
-                await bot.send_photo(
-                    chat_id=config_user["channel_link"],
-                    photo=photo_id,
-                    caption=post
-                )
+            if group_photo:
+                group = MediaGroupBuilder(caption=post)
+                for photo_id in group_photo:
+                    group.add_photo(media=photo_id)
+                await bot.send_media_group(config_user["channel_link"], group.build())
+
             else:
                 await bot.send_message(
                     chat_id=config_user["channel_link"],
@@ -184,7 +205,7 @@ async def callback_answer_post(callback: CallbackQuery) -> None:
                     link_preview_options=LinkPreviewOptions(
                         is_disabled=config_user["settings"]["link_preview"]
                     )
-            )
+                )
         except TelegramForbiddenError:
             await callback.message.answer(
                 "❌ Ошибка публикации!\n"
@@ -198,14 +219,33 @@ async def callback_answer_post(callback: CallbackQuery) -> None:
                 f"❌ Ошибка запроса!\n"
                 f"Telegram не смог отправить сообщение. Возможно, указан неверный юзернейм канала."
             )
-        await callback.message.delete()
-        await callback.message.answer("Пост успешно отправлен!", reply_markup=None)
+        if group_photo:
+            try:
+                await bot.delete_messages(
+                    callback.message.chat.id,
+                    message_ids=[id_msg for id_msg in range(group_msg_id, last_msg_id + 1)]
+                )
+            except TelegramBadRequest:
+                pass
+            await callback.message.answer("Пост успешно отправлен!", reply_markup=None)
+        else:
+            await callback.message.edit_text("Пост успешно отправлен!", reply_markup=None)
     else:
-        await callback.message.delete()
+        if group_photo:
+            try:
+                await bot.delete_messages(
+                    callback.message.chat.id,
+                    message_ids=[id_msg for id_msg in range(group_msg_id, last_msg_id+1)]
+                )
+            except TelegramBadRequest:
+                pass
+        else:
+            await callback.message.delete()
+    await state.clear()
 
 async def main() -> None:
     dp.include_router(router)
-    dp.message.outer_middleware(GroupPhotoMiddleware())
+    dp.message.middleware(GroupPhotoMiddleware())
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
