@@ -3,13 +3,14 @@ import logging
 import os
 import json
 import sys
-from aiogram import Bot, Dispatcher, html, F
+from aiogram import Bot, Dispatcher, html, F, Router, BaseMiddleware
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart, Command
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
+from aiogram.utils.media_group import MediaGroupBuilder
 from dotenv import load_dotenv
 from aiogram.filters.callback_data import CallbackData
 from aiogram.types import (
@@ -34,6 +35,10 @@ config_user = {
     }
 }
 
+cache_user = {
+    "post_text": ""
+}
+
 kb_markup_post = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="Отправить", callback_data="send_post")],
     [InlineKeyboardButton(text="Удалить", callback_data="delete_post")]
@@ -50,6 +55,7 @@ except FileNotFoundError:
 
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
+router = Router()
 
 @dp.message(CommandStart())
 async def command_start_handler(message: Message, state: FSMContext) -> None:
@@ -100,6 +106,7 @@ async def command_help_handler(message: Message) -> None:
 @dp.message(F.text)
 async def command_send_post(message: Message) -> None:
     post = message.text
+    cache_user["post_text"] = post
     try:
         await message.answer(
             post + f"\n\n{'━'*15}\nДействия:",
@@ -114,26 +121,51 @@ async def command_send_post(message: Message) -> None:
         logging.error(f"Ошибка при создании превью: {e}")
         await message.answer("Произошла неизвестная ошибка, повторите.")
 
-@dp.message(F.photo)
-async def command_send_post_with_photo(message: Message) -> None:
-    photo_id = message.photo[-2].file_id
+class GroupPhotoMiddleware(BaseMiddleware):
+    def __init__(self, latency: float = 0.5):
+        # {media_group: [media], ...}
+        self.cache: [str, list] = {}
+        self.latency = latency
+    
+    async def __call__(self, handler, event, data):
+        if not event.photo:
+            return await handler(event, data)
+        if not event.media_group_id:
+            data["group_photo"] = [event.photo[-1].file_id]
+            return await handler(event, data)
+        
+        try:
+            self.cache[event.media_group_id].append(event)
+
+        except KeyError:
+            self.cache[event.media_group_id] = [event]
+            await asyncio.sleep(self.latency)
+            msgs = self.cache.pop(event.media_group_id)
+            data["group_photo"] = [msg.photo[-2].file_id for msg in msgs]
+            result = await handler(event, data)
+
+@router.message(F.photo)
+async def command_send_post_with_photo(message: Message, group_photo) -> None:
     post = message.caption
+    if post is None:
+        await message.answer("Добавьте подпись к фото!")
+        return
+    
     try:
-        await message.answer_photo(
-            photo=photo_id,
-            caption=post + f"\n\n{'━'*15}\nДействия:",
-            reply_markup=kb_markup_post,
+        group = MediaGroupBuilder(caption=post)
+        for photo_id in group_photo:
+            group.add_photo(media=photo_id)
+        await bot.send_media_group(
+            message.from_user.id,
+            group.build(),
         )
     except TelegramBadRequest:
         await message.answer("В HTML-разметке есть ошибки. Исправьте их и отправьте сообщение снова.")
-    except Exception as e:
-        logging.error(f"Ошибка при создании превью: {e}")
-        await message.answer("Произошла неизвестная ошибка, повторите.")
 
 @dp.callback_query(F.data.endswith("post"))
 async def callback_answer_post(callback: CallbackQuery) -> None:
     command = callback.data
-    post = callback.message.html_text.replace(f"\n\n{'━'*15}\nДействия:", "")
+    post = cache_user["post_text"]
     await callback.answer()
 
     if command == "send_post":
@@ -172,6 +204,8 @@ async def callback_answer_post(callback: CallbackQuery) -> None:
         await callback.message.delete()
 
 async def main() -> None:
+    dp.include_router(router)
+    dp.message.outer_middleware(GroupPhotoMiddleware())
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
