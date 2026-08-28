@@ -51,7 +51,6 @@ except FileNotFoundError:
 
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
-router = Router()
 
 @dp.message(CommandStart())
 async def command_start_handler(message: Message, state: FSMContext) -> None:
@@ -99,9 +98,10 @@ async def command_help_handler(message: Message) -> None:
         f"Для отправки поста на канал просто введите текст.",
     )
 
-@router.message(F.text)
+@dp.message(F.text)
 async def command_send_post(message: Message, state: FSMContext) -> None:
     post = message.text
+    await state.clear()
     await state.update_data(saved_post=post)
     await state.set_state(PostCreation.holding_host)
     try:
@@ -152,7 +152,7 @@ class GroupPhotoMiddleware(BaseMiddleware):
 
             return await handler(event, data)
 
-@router.message(F.photo)
+@dp.message(F.photo)
 async def command_send_post_with_photo(message: Message, group_photo: list, post: str, state: FSMContext) -> None:
     if not post:
         await message.answer("Добавьте подпись к фото!")
@@ -180,7 +180,7 @@ async def command_send_post_with_photo(message: Message, group_photo: list, post
         logging.error(e)
         await message.answer("В HTML-разметке есть ошибки. Исправьте их и отправьте сообщение снова.")
 
-@router.callback_query(F.data.endswith("post"), PostCreation.holding_host)
+@dp.callback_query(F.data.endswith("post"), PostCreation.holding_host)
 async def callback_answer_post(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
     command = callback.data
     data = await state.get_data()
@@ -244,7 +244,6 @@ async def callback_answer_post(callback: CallbackQuery, state: FSMContext, bot: 
     await state.clear()
 
 async def main() -> None:
-    dp.include_router(router)
     dp.message.middleware(GroupPhotoMiddleware())
     await dp.start_polling(bot)
 
