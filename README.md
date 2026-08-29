@@ -1,7 +1,7 @@
 <div align="center">
 <img src="logo.png" alt="Logo" width="200">
 
-[![Version 0.4.0](https://img.shields.io/badge/Version-0.4.0-red.svg)](https://github.com/python3demon/TeleAutoPost)
+[![Version 0.2.0](https://img.shields.io/badge/Version-0.2.0-red.svg)](https://github.com/python3demon/TeleAutoPost)
 [![Python 3.14](https://img.shields.io/badge/Python-3.14-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![aiogram 3.30.0](https://img.shields.io/badge/aiogram-3.30.0-red.svg)](https://github.com/aiogram/aiogram/)
 
