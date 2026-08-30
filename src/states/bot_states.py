@@ -5,3 +5,6 @@ class Registration(StatesGroup):
 
 class PostCreation(StatesGroup):
     holding_host = State()
+
+class SaveDraft(StatesGroup):
+    name_draft = State()

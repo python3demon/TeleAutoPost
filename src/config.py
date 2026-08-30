@@ -26,12 +26,13 @@ except FileNotFoundError:
     config_user = {
         "id": -1,
         "channel_link": "",
-        "settings": {"link_preview": True}
+        "settings": {"link_preview": True},
+        "drafts": {}
     }
 
 def save_config():
     with open(FILE_CONFIG, "w", encoding="utf-8") as config:
-        json.dump(config_user, config, indent=4)
+        dump(config_user, config, indent=4)
 
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
