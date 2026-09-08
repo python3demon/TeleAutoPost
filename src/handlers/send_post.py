@@ -7,6 +7,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 
 from config import config_user, save_config
 from keyboards.inline import kb_markup_post
+from keyboards.reply import skip_or_add_photo
 from states.bot_states import Registration, PostCreation
 
 router = Router()
@@ -27,99 +28,109 @@ async def process_channel_registration(message: Message, state: FSMContext) -> N
     )
     await state.clear()
 
-@router.message(F.text)
-async def command_send_post(message: Message, state: FSMContext) -> None:
-    post = message.text
-    await state.clear()
-    await state.update_data(saved_post=post)
+async def send_preview(message: Message, bot: Bot, state: FSMContext) -> None:
     await state.set_state(PostCreation.holding_host)
+    data = await state.get_data()
+    post = data.get("post")
+    group_photo = data.get("group_photo")
+
     try:
-        await message.answer(
-            post + f"\n\n{'━'*15}\nДействия:",
-            reply_markup=kb_markup_post,
-            link_preview_options=LinkPreviewOptions(
-                is_disabled=config_user["settings"]["link_preview"]
+        if not group_photo:
+            await message.answer(
+                post,
+                link_preview_options=LinkPreviewOptions(
+                    is_disabled=config_user["settings"]["link_preview"]
+                )
             )
-        )
+            await message.answer("Выберите действие:", reply_markup=kb_markup_post)
+        else:
+            if len(post) > 1024:
+                await message.answer("Текст слишком длинный. Лимит 1024 символов.")
+                await state.clear()
+                return
+            group = MediaGroupBuilder(caption=post)
+            for photo_id in group_photo:
+                group.add_photo(media=photo_id)
+            await bot.send_media_group(message.from_user.id, group.build())
+            await message.answer("Выберите действие:", reply_markup=kb_markup_post)
     except TelegramBadRequest:
-        await message.answer("В HTML-разметке есть ошибки. Исправьте их и отправьте сообщение снова.")
+        await message.answer(
+            "В HTML-разметке есть ошибки. Исправьте их и отправьте заново.",
+            reply_markup=kb_start_reply
+        )
+        await state.clear()
     except Exception as e:
         logging.error(f"Ошибка при создании превью: {e}")
         await message.answer("Произошла неизвестная ошибка, повторите.")
+        await state.clear()
 
-@router.message(F.photo)
-async def command_send_post_with_photo(message: Message, group_photo: list, post: str, state: FSMContext, bot: Bot) -> None:
-    if not post:
-        await message.answer("Добавьте подпись к фото!")
-        return
+@router.message(F.text == "Создать пост")
+async def command_start_create_post(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await state.set_state(PostCreation.waiting_for_text)
+    await message.answer("Отправьте текст поста: ")
 
-    group = MediaGroupBuilder(caption=post)
-    for photo_id in group_photo:
-        group.add_photo(media=photo_id)
+@router.message(F.text, PostCreation.waiting_for_text)
+async def command_create_post(message: Message, state: FSMContext) -> None:
+    post = message.text
+    await state.update_data(post=post)
+    await message.answer("Добавьте фото/фотоальбом:", reply_markup=skip_or_add_photo)
+    await state.set_state(PostCreation.waiting_for_photo)
 
-    await state.update_data(saved_post=post, saved_group=group_photo)
-    await state.set_state(PostCreation.holding_host)
+@router.message(F.text == "Пропустить", PostCreation.waiting_for_photo)
+async def skip_func(message: Message, state: FSMContext, bot: Bot):
+    await send_preview(message, bot, state)
 
-    try:
-        group_msg = await bot.send_media_group(message.from_user.id, group.build())
-        await message.answer("Выберите действие:", reply_markup=kb_markup_post)
-        await state.update_data(group_msg_id=group_msg[0].message_id)
-    except TelegramBadRequest as e:
-        logging.error(e)
-        await message.answer("В HTML-разметке есть ошибки. Исправьте их и отправьте сообщение снова.")
+@router.message(F.photo, PostCreation.waiting_for_photo)
+async def add_photo(message: Message, group_photo: list, state: FSMContext, bot: Bot) -> None:
+    await state.update_data(group_photo=group_photo)
+    await send_preview(message, bot, state)
 
-@router.callback_query(F.data.endswith("post"), PostCreation.holding_host)
+@router.message(F.text, PostCreation.waiting_for_photo)
+async def other_text_instead(message: Message):
+    await message.answer("Отправьте изображение или нажмите на кнопку «Пропустить».")
+
+@router.callback_query(F.data == "send_post", PostCreation.holding_host)
 async def callback_answer_post(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
     command = callback.data
     data = await state.get_data()
-    post = data.get("saved_post")
-    group_photo = data.get("saved_group", [])
-    group_msg_id = data.get("group_msg_id")
+    post = data.get("post")
+    group_photo = data.get("group_photo")
     last_msg_id = callback.message.message_id
-    await callback.answer()
+    await callback.answer("Отправка...")
+    send = False
 
-    if command == "send_post":
-        try:
-            if group_photo:
-                group = MediaGroupBuilder(caption=post)
-                for photo_id in group_photo:
-                    group.add_photo(media=photo_id)
-                await bot.send_media_group(config_user["channel_link"], group.build())
-            else:
-                await bot.send_message(
-                    chat_id=config_user["channel_link"],
-                    text=post,
-                    link_preview_options=LinkPreviewOptions(
-                        is_disabled=config_user["settings"]["link_preview"]
-                    )
+    try:
+        if not group_photo:
+            await bot.send_message(
+                chat_id=config_user["channel_link"],
+                text=post,
+                link_preview_options=LinkPreviewOptions(
+                    is_disabled=config_user["settings"]["link_preview"]
                 )
-        except TelegramForbiddenError:
-            await callback.message.answer("❌ Ошибка публикации! Проверьте права администратора у бота.")
-            return
-        except TelegramBadRequest:
-            await callback.message.answer("❌ Ошибка запроса! Неверный юзернейм канала.")
-            return
-
-        if group_photo:
-            try:
-                await bot.delete_messages(
-                    callback.message.chat.id,
-                    message_ids=[id_msg for id_msg in range(group_msg_id, last_msg_id + 1)]
-                )
-            except TelegramBadRequest:
-                pass
-            await callback.message.answer("Пост успешно отправлен!")
+            )
         else:
-            await callback.message.edit_text("Пост успешно отправлен!")
+            group = MediaGroupBuilder(caption=post)
+            for photo_id in group_photo:
+                group.add_photo(media=photo_id)
+            await bot.send_media_group(config_user["channel_link"], group.build())
+        send = True
+    except TelegramForbiddenError:
+        await callback.message.answer("❌ Ошибка публикации! Проверьте права администратора у бота.")
+    except TelegramBadRequest:
+        await callback.message.answer("❌ Ошибка запроса! Неверный юзернейм канала.")
+    finally:
+        await state.clear()
+        if not send: return
+    
+    if not group_photo:
+        await callback.message.edit_text("Пост успешно отправлен!")
     else:
-        if group_photo:
-            try:
-                await bot.delete_messages(
-                    callback.message.chat.id,
-                    message_ids=[id_msg for id_msg in range(group_msg_id, last_msg_id + 1)]
-                )
-            except TelegramBadRequest:
-                pass
-        else:
-            await callback.message.delete()
+        await callback.message.delete()
+        await callback.message.answer("Пост успешно отправлен!")
+
+@router.callback_query(F.data == "delete_post", PostCreation.holding_host)
+async def command_delete_post(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
     await state.clear()
+    await callback.message.delete()
+    await callback.answer()

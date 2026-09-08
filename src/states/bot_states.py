@@ -4,4 +4,6 @@ class Registration(StatesGroup):
     waiting_for_channel = State()
 
 class PostCreation(StatesGroup):
+    waiting_for_text = State()
+    waiting_for_photo = State()
     holding_host = State()
