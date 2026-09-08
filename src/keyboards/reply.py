@@ -6,3 +6,10 @@ kb_start_reply = ReplyKeyboardMarkup(
     ],
     resize_keyboard=True
 )
+
+skip_or_add_photo = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Пропустить")],
+    ],
+    resize_keyboard=True
+)

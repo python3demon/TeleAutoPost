@@ -10,7 +10,6 @@ class GroupPhotoMiddleware(BaseMiddleware):
         if not event.photo:
             return await handler(event, data)
         if not event.media_group_id:
-            data["post"] = event.caption
             data["group_photo"] = [event.photo[-1].file_id]
             return await handler(event, data)
         
@@ -22,9 +21,4 @@ class GroupPhotoMiddleware(BaseMiddleware):
             await asyncio.sleep(self.latency)
             msgs = self.cache.pop(event.media_group_id)
             data["group_photo"] = [msg.photo[-1].file_id for msg in msgs]
-            data["post"] = None
-            for msg in msgs:
-                if msg.caption:
-                    data["post"] = msg.caption
-                    break
             return await handler(event, data)
