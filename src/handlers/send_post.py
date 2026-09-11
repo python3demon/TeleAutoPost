@@ -1,5 +1,5 @@
 import logging
-from aiogram import Router, F, Bot
+from aiogram import Router, F, Bot, html
 from aiogram.types import Message, CallbackQuery, LinkPreviewOptions
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.media_group import MediaGroupBuilder
@@ -9,6 +9,7 @@ from config import config_user, save_config
 from keyboards.inline import kb_markup_post
 from keyboards.reply import skip_or_add_photo
 from states.bot_states import Registration, PostCreation
+from time import time
 
 router = Router()
 
@@ -92,9 +93,13 @@ async def other_text_instead(message: Message):
 
 @router.callback_query(F.data == "save_post", PostCreation.holding_host)
 async def callback_save_post(callback: CallbackQuery, state: FSMContext):
-    await callback.answer("В разработке")
+    data = await state.get_data()
+    await callback.answer("Сохраняем...")
+    config_user["drafts"][int(time())] = data.get("post")
+    save_config()
     await callback.message.delete()
     await state.clear()
+    await callback.message.answer("Пост успешно сохранен!")
 
 @router.callback_query(F.data == "send_post", PostCreation.holding_host)
 async def callback_answer_post(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
