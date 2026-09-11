@@ -94,9 +94,16 @@ async def other_text_instead(message: Message):
 @router.callback_query(F.data == "save_post", PostCreation.holding_host)
 async def callback_save_post(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
+    post = data.get("post")
+    media = data.get("group_photo")
+
     await callback.answer("Сохраняем...")
-    config_user["drafts"][int(time())] = data.get("post")
+    config_user["drafts"][int(time())] = {
+        "post": data.get("post"),
+        "group_photo": data.get("group_photo"),
+    }
     save_config()
+    
     await callback.message.delete()
     await state.clear()
     await callback.message.answer("Пост успешно сохранен!")
