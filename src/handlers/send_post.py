@@ -90,6 +90,12 @@ async def add_photo(message: Message, group_photo: list, state: FSMContext, bot:
 async def other_text_instead(message: Message):
     await message.answer("Отправьте изображение или нажмите на кнопку «Пропустить».")
 
+@router.callback_query(F.data == "save_post", PostCreation.holding_host)
+async def callback_save_post(callback: CallbackQuery, state: FSMContext):
+    await callback.answer("В разработке")
+    await callback.message.delete()
+    await state.clear()
+
 @router.callback_query(F.data == "send_post", PostCreation.holding_host)
 async def callback_answer_post(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
     command = callback.data
@@ -121,8 +127,9 @@ async def callback_answer_post(callback: CallbackQuery, state: FSMContext, bot: 
         await callback.message.answer("❌ Ошибка запроса! Неверный юзернейм канала.")
     finally:
         await state.clear()
-        if not send: return
     
+    if not send:
+        return
     if not group_photo:
         await callback.message.edit_text("Пост успешно отправлен!")
     else:
