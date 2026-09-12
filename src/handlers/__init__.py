@@ -7,6 +7,6 @@ handlers_router = Router()
 
 handlers_router.include_routers(
     common_router,
-    drafts_router,
-    send_post_router
+    send_post_router,
+    drafts_router
 )

@@ -13,7 +13,7 @@ async def build_list_draft(drafts: dict):
     for date_key in drafts:
         post_name = drafts[date_key]["post"][:6]
         post_buttons.add(
-            InlineKeyboardButton(text=post_name, callback_data=date_key)
+            InlineKeyboardButton(text=post_name, callback_data=f"view_{date_key}")
         )
     post_buttons.adjust(1)
 
