@@ -98,7 +98,7 @@ async def callback_save_post(callback: CallbackQuery, state: FSMContext):
     media = data.get("group_photo")
 
     await callback.answer("Сохраняем...")
-    config_user["drafts"][int(time())] = {
+    config_user["drafts"][str(int(time()))] = {
         "post": data.get("post"),
         "group_photo": data.get("group_photo"),
     }
