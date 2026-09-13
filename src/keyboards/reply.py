@@ -2,7 +2,8 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 kb_start_reply = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Создать пост")]
+        [KeyboardButton(text="Создать пост")],
+        [KeyboardButton(text="Мои черновики")]
     ],
     resize_keyboard=True
 )

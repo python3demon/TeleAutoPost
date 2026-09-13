@@ -1,5 +1,5 @@
 import logging
-from aiogram import Router, F, Bot
+from aiogram import Router, F, Bot, html
 from aiogram.types import Message, CallbackQuery, LinkPreviewOptions
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.media_group import MediaGroupBuilder
@@ -9,6 +9,7 @@ from config import config_user, save_config
 from keyboards.inline import kb_markup_post
 from keyboards.reply import skip_or_add_photo
 from states.bot_states import Registration, PostCreation
+from time import time
 
 router = Router()
 
@@ -90,6 +91,23 @@ async def add_photo(message: Message, group_photo: list, state: FSMContext, bot:
 async def other_text_instead(message: Message):
     await message.answer("Отправьте изображение или нажмите на кнопку «Пропустить».")
 
+@router.callback_query(F.data == "save_post", PostCreation.holding_host)
+async def callback_save_post(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    post = data.get("post")
+    media = data.get("group_photo")
+
+    await callback.answer("Сохраняем...")
+    config_user["drafts"][str(int(time()))] = {
+        "post": data.get("post"),
+        "group_photo": data.get("group_photo"),
+    }
+    save_config()
+    
+    await callback.message.delete()
+    await state.clear()
+    await callback.message.answer("Пост успешно сохранен!")
+
 @router.callback_query(F.data == "send_post", PostCreation.holding_host)
 async def callback_answer_post(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
     command = callback.data
@@ -121,8 +139,9 @@ async def callback_answer_post(callback: CallbackQuery, state: FSMContext, bot: 
         await callback.message.answer("❌ Ошибка запроса! Неверный юзернейм канала.")
     finally:
         await state.clear()
-        if not send: return
     
+    if not send:
+        return
     if not group_photo:
         await callback.message.edit_text("Пост успешно отправлен!")
     else:
