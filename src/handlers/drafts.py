@@ -33,7 +33,8 @@ async def cat_draft(callback: CallbackQuery):
     
     draft_edit = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Назад", callback_data="back")],
-        [InlineKeyboardButton(text="Удалить", callback_data=f"del_{num_draft}")]
+        [InlineKeyboardButton(text="Удалить", callback_data=f"del_{num_draft}")],
+        [InlineKeyboardButton(text="Отправить", callback_data=f"send_{num_draft}")]
     ])
 
     await callback.message.answer(f"Ваши действия?", reply_markup=draft_edit)
@@ -57,3 +58,28 @@ async def del_draft(callback: CallbackQuery):
     del config_user["drafts"][id_draft]
     save_config()
     await callback.answer("Черновик успешно удален!")
+
+@router.callback_query(F.data.startswith("send_"))
+async def send_draft(callback: CallbackQuery, bot: Bot):
+    num_draft = callback.data.split("_")[-1]
+    post = config_user["drafts"].get(num_draft)
+    if not post:
+        await callback.answer("Нет такого поста!")
+        return
+    post_text = post["post"]
+    group_photo = config_user["drafts"][num_draft]["group_photo"]
+    await callback.message.delete()
+    
+    if not group_photo:
+        await bot.send_message(chat_id=config_user["channel_link"], text=post_text) 
+    else:
+        builder = MediaGroupBuilder(caption=post_text)
+        for photo_id in group_photo:
+            builder.add_photo(media=photo_id)
+        
+        await bot.send_media_group(chat_id=config_user["channel_link"], media=builder.build())
+    
+    del config_user["drafts"][num_draft]
+    save_config()
+    
+    await callback.answer("Пост успешно отправлен!")
