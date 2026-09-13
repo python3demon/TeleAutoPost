@@ -19,6 +19,3 @@ async def build_list_draft(drafts: dict):
 
     return post_buttons.as_markup()
 
-draft_edit = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="Назад", callback_data="back")]
-])

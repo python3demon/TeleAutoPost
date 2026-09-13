@@ -1,7 +1,7 @@
 from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery
-from config import config_user
-from keyboards.inline import build_list_draft, draft_edit
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from config import config_user, save_config
+from keyboards.inline import build_list_draft
 from aiogram.utils.media_group import MediaGroupBuilder
 
 router = Router()
@@ -31,8 +31,12 @@ async def cat_draft(callback: CallbackQuery):
         
         await callback.message.answer_media_group(media=builder.build())
     
+    draft_edit = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Назад", callback_data="back")],
+        [InlineKeyboardButton(text="Удалить", callback_data=f"del_{num_draft}")]
+    ])
+
     await callback.message.answer(f"Ваши действия?", reply_markup=draft_edit)
-    
     await callback.answer()
 
 @router.callback_query(F.data == "back")
@@ -41,3 +45,15 @@ async def get_back_drafts(callback: CallbackQuery):
     await send_drafts(callback.message)
     
     await callback.answer()
+
+@router.callback_query(F.data.startswith("del_"))
+async def del_draft(callback: CallbackQuery):
+    id_draft = callback.data.split("_")[-1]
+    
+    if id_draft not in config_user["drafts"]:
+        await callback.answer("Уже удален")
+        return
+    
+    del config_user["drafts"][id_draft]
+    save_config()
+    await callback.answer("Черновик успешно удален!")
