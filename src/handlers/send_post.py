@@ -1,13 +1,13 @@
 import logging
 from aiogram import Router, F, Bot, html
-from aiogram.types import Message, CallbackQuery, LinkPreviewOptions
+from aiogram.types import Message, CallbackQuery, LinkPreviewOptions, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.media_group import MediaGroupBuilder
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 
 from config import config_user, save_config
 from keyboards.inline import kb_markup_post
-from keyboards.reply import skip_or_add_photo
+from keyboards.reply import skip_or_add_photo, kb_start_reply
 from states.bot_states import Registration, PostCreation
 from time import time
 
@@ -34,14 +34,18 @@ async def send_preview(message: Message, bot: Bot, state: FSMContext) -> None:
     data = await state.get_data()
     post = data.get("post")
     group_photo = data.get("group_photo")
+    temp_msg = await message.answer("Готовлю пост...", reply_markup=ReplyKeyboardRemove())
+    await temp_msg.delete()
 
     try:
         if not group_photo:
+            
             await message.answer(
                 post,
                 link_preview_options=LinkPreviewOptions(
                     is_disabled=config_user["settings"]["link_preview"]
-                )
+                ),
+                reply_markup=ReplyKeyboardRemove()
             )
             await message.answer("Выберите действие:", reply_markup=kb_markup_post)
         else:
@@ -54,6 +58,7 @@ async def send_preview(message: Message, bot: Bot, state: FSMContext) -> None:
                 group.add_photo(media=photo_id)
             await bot.send_media_group(message.from_user.id, group.build())
             await message.answer("Выберите действие:", reply_markup=kb_markup_post)
+
     except TelegramBadRequest:
         await message.answer(
             "В HTML-разметке есть ошибки. Исправьте их и отправьте заново.",
@@ -69,7 +74,7 @@ async def send_preview(message: Message, bot: Bot, state: FSMContext) -> None:
 async def command_start_create_post(message: Message, state: FSMContext) -> None:
     await state.clear()
     await state.set_state(PostCreation.waiting_for_text)
-    await message.answer("Отправьте текст поста: ")
+    await message.answer("Отправьте текст поста: ", reply_markup=ReplyKeyboardRemove())
 
 @router.message(F.text, PostCreation.waiting_for_text)
 async def command_create_post(message: Message, state: FSMContext) -> None:
@@ -106,7 +111,7 @@ async def callback_save_post(callback: CallbackQuery, state: FSMContext):
     
     await callback.message.delete()
     await state.clear()
-    await callback.message.answer("Пост успешно сохранен!")
+    await callback.message.answer("Пост успешно сохранен!", reply_markup=kb_start_reply)
 
 @router.callback_query(F.data == "send_post", PostCreation.holding_host)
 async def callback_answer_post(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
@@ -115,7 +120,7 @@ async def callback_answer_post(callback: CallbackQuery, state: FSMContext, bot: 
     post = data.get("post")
     group_photo = data.get("group_photo")
     last_msg_id = callback.message.message_id
-    await callback.answer("Отправка...")
+    await callback.message.answer("Отправка...", reply_markup=ReplyKeyboardRemove())
     send = False
 
     try:
@@ -142,14 +147,12 @@ async def callback_answer_post(callback: CallbackQuery, state: FSMContext, bot: 
     
     if not send:
         return
-    if not group_photo:
-        await callback.message.edit_text("Пост успешно отправлен!")
-    else:
-        await callback.message.delete()
-        await callback.message.answer("Пост успешно отправлен!")
+    await callback.message.delete()
+    await callback.message.answer("Пост успешно отправлен!", reply_markup=kb_start_reply)
 
 @router.callback_query(F.data == "delete_post", PostCreation.holding_host)
 async def command_delete_post(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
     await state.clear()
     await callback.message.delete()
     await callback.answer()
+    await callback.message.answer("Пост успешно удален!", reply_markup=kb_start_reply)
